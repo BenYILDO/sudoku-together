@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en-US">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sudoku Together - Online Multiplayer Sudoku</title>
+  <meta name="description" content="Play Sudoku online with friends! Create or join game rooms, choose difficulty levels, and solve puzzles collaboratively in real-time. Features player indicators, timer, and scoring.">
+  <meta name="keywords" content="sudoku, multiplayer sudoku, online sudoku, puzzle game, brain game, collaborative game, sudoku with friends">
+  <meta name="author" content="Sudoku Together Team">
+  <meta name="theme-color" content="#1e293b"> {/* slate-800 */}
+
+  <link rel="icon" href="/favicon.ico" type="image/x-icon">
+  <link rel="apple-touch-icon" href="/logo192.png"> {/* Example: For PWA manifest */}
+  <link rel="manifest" href="/manifest.json"> {/* Example: For PWA */}
+
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { margin: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f1f5f9; /* bg-slate-100 */ }
+    html.dark body { background-color: #0f172a; /* bg-slate-900 */ }
+
+    .sudoku-cell input::-webkit-outer-spin-button,
+    .sudoku-cell input::-webkit-inner-spin-button {
+      -webkit-appearance: none;
+      margin: 0;
+    }
+    .sudoku-cell input[type=number] {
+      -moz-appearance: textfield;
+    }
+
+    /* General Fade-in Animation */
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .animate-fadeIn { animation: fadeIn 0.5s ease-out forwards; }
+    .animate-fadeIn-delay-1 { animation: fadeIn 0.5s ease-out 0.1s forwards; opacity: 0; }
+    .animate-fadeIn-delay-2 { animation: fadeIn 0.5s ease-out 0.2s forwards; opacity: 0; }
+    .animate-fadeIn-delay-3 { animation: fadeIn 0.5s ease-out 0.3s forwards; opacity: 0; }
+
+
+    /* Sudoku Cell Animations */
+    @keyframes pulseCorrect {
+      0%, 100% { transform: scale(1); box-shadow: 0 0 0 2px rgba(74, 222, 128, 0); } /* green-400 transparent */
+      50% { transform: scale(1.07); box-shadow: 0 0 0 4px rgba(74, 222, 128, 0.7); }
+    }
+    .animate-pulseCorrect { animation: pulseCorrect 0.6s ease-in-out; }
+
+    @keyframes pulseIncorrect {
+      0%, 100% { transform: scale(1); box-shadow: 0 0 0 2px rgba(248, 113, 113, 0); } /* red-400 transparent */
+      50% { transform: scale(1.07); box-shadow: 0 0 0 4px rgba(248, 113, 113, 0.7); }
+    }
+    .animate-pulseIncorrect { animation: pulseIncorrect 0.6s ease-in-out; }
+    
+    @keyframes shake {
+      0%, 100% { transform: translateX(0) scale(1); } /* Keep scale consistent with pulse */
+      20% { transform: translateX(-4px) scale(1.07); }
+      40% { transform: translateX(4px) scale(1.07); }
+      60% { transform: translateX(-4px) scale(1.07); }
+      80% { transform: translateX(4px) scale(1.07); }
+    }
+    .animate-shake { animation: shake 0.5s ease-in-out; }
+
+    @keyframes pulseHint {
+      0%, 100% { transform: scale(1); background-color: var(--hint-pulse-end-bg, transparent); box-shadow: 0 0 0 2px rgba(96, 165, 250, 0); } /* blue-400 transparent */
+      50% { transform: scale(1.07); background-color: var(--hint-pulse-start-bg, rgba(96, 165, 250, 0.3)); box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.7); }
+    }
+    .animate-pulseHint { animation: pulseHint 0.8s ease-in-out; }
+
+    @keyframes selectedPulse { /* For initial selection */
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.07); }
+    }
+    .animate-selectedPulse { animation: selectedPulse 0.3s ease-out; }
+
+
+    /* TopInfoBar Animations */
+    @keyframes scoreUpdate {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.2); color: #a855f7; } /* purple-500 */
+      100% { transform: scale(1); }
+    }
+    .animate-scoreUpdate { animation: scoreUpdate 0.5s ease-out; display: inline-block; }
+
+    @keyframes messageSlideIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .animate-messageSlideIn { animation: messageSlideIn 0.4s ease-out forwards; }
+    
+    /* General button hover/focus subtle scale */
+    .subtle-interactive {
+      transition: transform 0.2s ease-out, box-shadow 0.2s ease-out;
+    }
+    .subtle-interactive:hover {
+      transform: scale(1.03);
+    }
+    .subtle-interactive:focus-visible {
+      transform: scale(1.03);
+      box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.5); /* focus:ring-indigo-300 */
+    }
+
+    /* PlayerSidebar active indicator */
+    @keyframes pulseActive {
+      0%, 100% { opacity: 0.7; transform: scale(1); }
+      50% { opacity: 1; transform: scale(1.15); }
+    }
+    .animate-pulseActive {
+      animation: pulseActive 1.5s infinite ease-in-out;
+    }
+
+    /* Copy Feedback Message */
+    @keyframes fadeOutUp {
+      from { opacity: 1; transform: translateY(0); }
+      to { opacity: 0; transform: translateY(-20px); }
+    }
+    .copy-feedback {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background-color: #22c55e; /* green-500 */
+      color: white;
+      padding: 8px 16px;
+      border-radius: 6px;
+      font-size: 0.875rem;
+      z-index: 1000;
+      animation: fadeIn 0.3s ease-out, fadeOutUp 0.5s ease-in 1.7s forwards;
+    }
+
+
+  </style>
+<script type="importmap">
+{
+  "imports": {
+    "react-router-dom": "https://esm.sh/react-router-dom@7.6.1",
+    "react/": "https://esm.sh/react@19.1.0/",
+    "react": "https://esm.sh/react@19.1.0",
+    "react-dom/": "https://esm.sh/react-dom@19.1.0/",
+    "@heroicons/react/": "https://esm.sh/@heroicons/react@2.2.0/",
+    "uuid": "https://esm.sh/uuid@11.1.0"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+<body>
+  <noscript>You need to enable JavaScript to run this app.</noscript>
+  <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>

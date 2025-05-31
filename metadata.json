@@ -1,0 +1,5 @@
+{
+  "name": "Sudoku Together",
+  "description": "Play Sudoku online with friends! Create or join game rooms, choose difficulty levels, and solve puzzles collaboratively. Features include real-time player indicators, game timer, and score tracking.",
+  "requestFramePermissions": []
+}

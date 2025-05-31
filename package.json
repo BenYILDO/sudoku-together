@@ -1,0 +1,27 @@
+{
+  "name": "sudoku-together",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react-router-dom": "7.6.1",
+    "react": "19.1.0",
+    "react-dom": "19.1.0",
+    "@heroicons/react": "2.2.0",
+    "uuid": "11.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "typescript": "~5.7.2",
+    "vite": "^6.2.0",
+    "@types/react": "^18.2.14",
+    "@types/react-dom": "^18.2.7",
+    "@types/react-router-dom": "^5.3.3",
+    "@types/uuid": "^9.0.7"
+  }
+}
