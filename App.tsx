@@ -344,19 +344,22 @@ const GamePage: React.FC<{ currentPlayer: Player | null; setCurrentPlayer: (play
   const [isNotesMode, setIsNotesMode] = useState(false);
   const [animatedCellKey, setAnimatedCellKey] = useState<string | null>(null);
 
-  // Oyun state'ini Supabase'den çek
+  // Oyun state'ini Supabase'den çek (otomatik tekrar denemeli)
   useEffect(() => {
     if (!gameId) return;
     let subscription: any;
-    async function fetchGame() {
-      const { data, error } = await supabase.from('games').select('data').eq('game_id', gameId).single();
-      if (data && data.data) {
-        setGameState(deserializeGameState(data.data));
-      } else {
-        setGameState(null);
+    async function fetchGameWithRetry(retries = 4) {
+      for (let i = 0; i < retries; i++) {
+        const { data, error } = await supabase.from('games').select('data').eq('game_id', gameId).single();
+        if (data && data.data) {
+          setGameState(deserializeGameState(data.data));
+          return;
+        }
+        await new Promise(res => setTimeout(res, 400)); // 400ms bekle
       }
+      setGameState(null); // Hala bulamazsa hata göster
     }
-    fetchGame();
+    fetchGameWithRetry();
     // Gerçek zamanlı dinleme
     subscription = supabase
       .channel('public:games')
