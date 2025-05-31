@@ -142,8 +142,12 @@ const HomePage: React.FC<{ setCurrentPlayer: (player: Player) => void; currentPl
     };
     copyToClipboard(gameId);
     copyToClipboard(getGameLink(gameId), true);
-    await createGame(gameId, serializeGameState(newGame));
-    navigate(`/game/${gameId}`);
+    const error = await createGame(gameId, serializeGameState(newGame));
+    if (!error) {
+      navigate(`/game/${gameId}`);
+    } else {
+      alert("Oyun oluşturulamadı! Lütfen tekrar deneyin.");
+    }
   };
 
   const handleJoinGame = async (gameIdToJoin: string) => {
