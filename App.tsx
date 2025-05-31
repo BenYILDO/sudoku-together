@@ -8,6 +8,8 @@ import PlayerSidebar from './components/PlayerSidebar'; // New component
 import { Difficulty, GameState, Player, SudokuGridType, CellData, PlayerFocus, RoomInfo, CurrentPlayerDisplayStats } from './types';
 import { generateSudokuSolution, createPuzzle, createInitialGrid, checkMove, isBoardSolved, getPlayerColor } from './utils/sudoku';
 import { ClipboardDocumentCheckIcon, ClipboardIcon } from '@heroicons/react/24/outline';
+import { supabase } from './supabaseClient';
+import { createGame } from './supabaseApi';
 
 const GRID_SIZE = 9;
 const BOX_SIZE = 3;
@@ -20,7 +22,6 @@ const POINTS_COMBO_BASE = 5;
 const POINTS_BOX_COMPLETE = 50;
 const POINTS_ROW_COMPLETE = 30;
 const POINTS_COLUMN_COMPLETE = 30;
-
 
 const getLocalStorageItem = <T,>(key: string): T | null => {
   try {
@@ -82,26 +83,27 @@ const HomePage: React.FC<{ setCurrentPlayer: (player: Player) => void; currentPl
       setCurrentPlayer(storedPlayer);
       setPlayerName(storedPlayer.name);
     }
-    const allGameIds = Object.keys(localStorage).filter(key => key.startsWith('sudokuGame_'));
-    const roomInfos: RoomInfo[] = allGameIds
-      .map(gameIdKey => {
-        const gameState = getLocalStorageItem<GameState>(gameIdKey);
-        if (!gameState) return null;
+    // Oda listesini Supabase'den çek
+    async function fetchRooms() {
+      const { data, error } = await supabase.from('games').select('game_id, data, created_at');
+      if (!data) return;
+      const roomInfos: RoomInfo[] = data.map((row: any) => {
+        const gameState = row.data;
         return {
-          gameId: gameState.gameId,
+          gameId: row.game_id,
           difficulty: gameState.difficulty,
           playerCount: gameState.players.length,
           hasPassword: !!gameState.password,
-          createdAt: gameState.startTime || Date.now(),
+          createdAt: row.created_at ? new Date(row.created_at).getTime() : Date.now(),
           isGameOver: gameState.isGameOver,
-        } as RoomInfo;
-      })
-      .filter((room): room is RoomInfo => room !== null)
-      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-    setRooms(roomInfos);
+        };
+      }).sort((a: RoomInfo, b: RoomInfo) => (b.createdAt || 0) - (a.createdAt || 0));
+      setRooms(roomInfos);
+    }
+    fetchRooms();
   }, [setCurrentPlayer]);
 
-  const handleCreateGame = () => {
+  const handleCreateGame = async () => {
     let user = currentPlayer;
     if (!user || (playerName && playerName.trim() !== user.name)) {
       user = generatePlayer(playerName.trim() || 'Host');
@@ -112,14 +114,11 @@ const HomePage: React.FC<{ setCurrentPlayer: (player: Player) => void; currentPl
       setCurrentPlayer(user);
       setLocalStorageItem('sudokuCurrentPlayer', user);
     }
-
-
     const gameId = uuidv4().slice(0, 8);
     const solution = generateSudokuSolution();
     const puzzle = createPuzzle(solution, difficulty);
     const initialBoard = createInitialGrid(puzzle);
     const hostPlayer = {...user!, lastActivityTimestamp: Date.now() };
-
     const newGame: GameState = {
       gameId,
       difficulty,
@@ -136,34 +135,34 @@ const HomePage: React.FC<{ setCurrentPlayer: (player: Player) => void; currentPl
       history: [],
       playerScores: { [hostPlayer.id]: 0 },
       playerComboCounts: { [hostPlayer.id]: 0 },
-      totalGameLives: MAX_GAME_LIVES, // Initialize total game lives
+      totalGameLives: MAX_GAME_LIVES,
       completedUnits: { boxes: new Set(), rows: new Set(), cols: new Set() },
       gameOutcome: 'inprogress',
       lastModifierId: hostPlayer.id,
     };
-    setLocalStorageItem(`sudokuGame_${gameId}`, newGame);
-    copyToClipboard(gameId); // Also copy new game ID
+    copyToClipboard(gameId);
     copyToClipboard(getGameLink(gameId), true);
+    await createGame(gameId, serializeGameState(newGame));
     navigate(`/game/${gameId}`);
   };
 
-  const handleJoinGame = (gameIdToJoin: string) => {
+  const handleJoinGame = async (gameIdToJoin: string) => {
     if (!gameIdToJoin.trim()) {
       alert("Please enter a Game ID.");
       return;
     }
-    const gameToJoin = getLocalStorageItem<GameState>(`sudokuGame_${gameIdToJoin.trim()}`);
-    if (!gameToJoin) {
+    const { data: gameData, error } = await supabase.from('games').select('data').eq('game_id', gameIdToJoin.trim()).single();
+    if (!gameData || !gameData.data) {
       alert("Game not found!");
       return;
     }
+    const gameToJoin = deserializeGameState(gameData.data);
     if (gameToJoin.password && gameToJoin.password !== joinPassword) {
       alert("Incorrect password!");
       return;
     }
-
     let user = currentPlayer;
-     if (!user || (playerName.trim() && playerName.trim() !== user.name)) {
+    if (!user || (playerName.trim() && playerName.trim() !== user.name)) {
       user = generatePlayer(playerName.trim() || `Player ${gameToJoin.players.length + 1}`, gameToJoin.players);
       setCurrentPlayer(user);
       setLocalStorageItem('sudokuCurrentPlayer', user);
@@ -172,24 +171,20 @@ const HomePage: React.FC<{ setCurrentPlayer: (player: Player) => void; currentPl
       setCurrentPlayer(user);
       setLocalStorageItem('sudokuCurrentPlayer', user);
     }
-
     const joiningPlayer = {...user!, lastActivityTimestamp: Date.now()};
-
     if (!gameToJoin.players.find(p => p.id === joiningPlayer.id)) {
       gameToJoin.players.push(joiningPlayer);
       gameToJoin.playerFocusMap[joiningPlayer.id] = null;
-      gameToJoin.playerScores[joiningPlayer.id] = 0; // Initialize score for new player
-      gameToJoin.playerComboCounts[joiningPlayer.id] = 0; // Initialize combo for new player
-      // totalGameLives is already set when game was created, not per player
-      if (gameToJoin.totalGameLives === undefined) gameToJoin.totalGameLives = MAX_GAME_LIVES; // Safety init
+      gameToJoin.playerScores[joiningPlayer.id] = 0;
+      gameToJoin.playerComboCounts[joiningPlayer.id] = 0;
+      if (gameToJoin.totalGameLives === undefined) gameToJoin.totalGameLives = MAX_GAME_LIVES;
       if (!gameToJoin.completedUnits) gameToJoin.completedUnits = { boxes: new Set(), rows: new Set(), cols: new Set() };
-      else { 
+      else {
         gameToJoin.completedUnits.boxes = new Set(Array.from(gameToJoin.completedUnits.boxes || []));
         gameToJoin.completedUnits.rows = new Set(Array.from(gameToJoin.completedUnits.rows || []));
         gameToJoin.completedUnits.cols = new Set(Array.from(gameToJoin.completedUnits.cols || []));
       }
-      gameToJoin.players = gameToJoin.players.map(p => ({...p, lastActivityTimestamp: p.id === joiningPlayer.id ? Date.now() : p.lastActivityTimestamp || Date.now() }));
-      setLocalStorageItem(`sudokuGame_${gameIdToJoin.trim()}`, gameToJoin);
+      await supabase.from('games').update({ data: serializeGameState(gameToJoin) }).eq('game_id', gameIdToJoin.trim());
     }
     navigate(`/game/${gameIdToJoin.trim()}`);
   };
@@ -345,56 +340,40 @@ const GamePage: React.FC<{ currentPlayer: Player | null; setCurrentPlayer: (play
   const [isNotesMode, setIsNotesMode] = useState(false);
   const [animatedCellKey, setAnimatedCellKey] = useState<string | null>(null);
 
-  const triggerCellAnimation = (r: number, c: number, type: 'correct' | 'incorrect' | 'hint' | 'selected') => {
-    setAnimatedCellKey(`${r}-${c}-${type}-${Date.now()}`);
-  };
-  
+  // Oyun state'ini Supabase'den çek
   useEffect(() => {
-    if (selectedCell) {
-      triggerCellAnimation(selectedCell.r, selectedCell.c, 'selected');
-    }
-  }, [selectedCell]);
-
-
-  const updateGameState = useCallback((newGameState: GameState | null, options?: { addToHistory?: boolean; moveDetails?: {r:number, c:number, value: number | null} }) => {
-    if (newGameState && gameId) {
-      if (options?.addToHistory && gameState && localPlayer) { 
-        const moveDetails = options.moveDetails || (selectedCell ? { r: selectedCell.r, c: selectedCell.c, value: newGameState.currentBoard[selectedCell.r][selectedCell.c].value } : { r: -1, c: -1, value: null });
-        const newHistoryEntry = {
-          board: gameState.currentBoard, 
-          player: localPlayer.id,
-          move: moveDetails
-        };
-        newGameState.history = [...(newGameState.history || []), newHistoryEntry].slice(-20);
+    if (!gameId) return;
+    let subscription: any;
+    async function fetchGame() {
+      const { data, error } = await supabase.from('games').select('data').eq('game_id', gameId).single();
+      if (data && data.data) {
+        setGameState(deserializeGameState(data.data));
+      } else {
+        setGameState(null);
       }
-      
-      newGameState.players = newGameState.players.map(p => {
-          if (p.id === localPlayer?.id) { 
-              return {...p, lastActivityTimestamp: Date.now() };
-          }
-          return p;
-      });
-      if (localPlayer) newGameState.lastModifierId = localPlayer.id;
+    }
+    fetchGame();
+    // Gerçek zamanlı dinleme
+    subscription = supabase
+      .channel('public:games')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'games', filter: `game_id=eq.${gameId}` }, (payload: any) => {
+        if (payload.new && payload.new.data) {
+          setGameState(deserializeGameState(payload.new.data));
+        }
+      })
+      .subscribe();
+    return () => {
+      if (subscription) supabase.removeChannel(subscription);
+    };
+  }, [gameId]);
 
-
-      newGameState.players.forEach(p => {
-        if (newGameState.playerScores[p.id] === undefined) newGameState.playerScores[p.id] = 0;
-        if (newGameState.playerComboCounts[p.id] === undefined) newGameState.playerComboCounts[p.id] = 0;
-        // totalGameLives is global, not per player
-        if (p.lastActivityTimestamp === undefined) p.lastActivityTimestamp = Date.now();
-      });
-      if (newGameState.totalGameLives === undefined) newGameState.totalGameLives = MAX_GAME_LIVES; // Safety init
-
-       if (!newGameState.completedUnits) newGameState.completedUnits = { boxes: new Set(), rows: new Set(), cols: new Set() };
-       else { 
-           newGameState.completedUnits.boxes = new Set(Array.from(newGameState.completedUnits.boxes || []));
-           newGameState.completedUnits.rows = new Set(Array.from(newGameState.completedUnits.rows || []));
-           newGameState.completedUnits.cols = new Set(Array.from(newGameState.completedUnits.cols || []));
-       }
-      setLocalStorageItem(`sudokuGame_${gameId}`, newGameState);
+  // Oyun güncelleme fonksiyonu
+  const updateGameState = useCallback(async (newGameState: GameState | null, options?: { addToHistory?: boolean; moveDetails?: {r:number, c:number, value: number | null} }) => {
+    if (newGameState && gameId) {
+      await supabase.from('games').update({ data: serializeGameState(newGameState) }).eq('game_id', gameId);
     }
     setGameState(newGameState);
-  }, [gameId, localPlayer, gameState, selectedCell]);
+  }, [gameId]);
 
   useEffect(() => {
     if (!localPlayer) {
@@ -776,6 +755,11 @@ const GamePage: React.FC<{ currentPlayer: Player | null; setCurrentPlayer: (play
     }
   };
 
+  // Hücre animasyonlarını tetikleyen fonksiyon (GamePage içinde tekrar tanımlandı)
+  const triggerCellAnimation = (r: number, c: number, type: 'correct' | 'incorrect' | 'hint' | 'selected') => {
+    setAnimatedCellKey(`${r}-${c}-${type}-${Date.now()}`);
+  };
+
   if (!gameState || !localPlayer) {
     return (
         <div className="flex flex-col items-center justify-center min-h-screen bg-slate-100 dark:bg-slate-900 p-4">
@@ -889,3 +873,25 @@ function App() {
 }
 
 export default App;
+
+// --- Set <-> Array Dönüşüm Fonksiyonları ---
+function serializeGameState(gameState: GameState): any {
+  return {
+    ...gameState,
+    completedUnits: {
+      boxes: Array.from(gameState.completedUnits.boxes),
+      rows: Array.from(gameState.completedUnits.rows),
+      cols: Array.from(gameState.completedUnits.cols),
+    },
+  };
+}
+function deserializeGameState(data: any): GameState {
+  return {
+    ...data,
+    completedUnits: {
+      boxes: new Set(data.completedUnits?.boxes || []),
+      rows: new Set(data.completedUnits?.rows || []),
+      cols: new Set(data.completedUnits?.cols || []),
+    },
+  };
+}
